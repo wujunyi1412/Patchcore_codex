@@ -1,0 +1,13 @@
+.idea/
+__pycache__/
+LabletAnomaly.egg-info/
+
+build/
+dataset/
+models/
+patchcore_codex/
+.venv/
+infer_out/
+onnx_out/
+.uv-cache/
+artifacts

@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: patchcore
+Version: 0.1.0
+License-File: LICENSE
+License-File: NOTICE
+Requires-Dist: faiss-cpu
+Requires-Dist: matplotlib>=3.5.0
+Requires-Dist: pillow>=8.4.0
+Requires-Dist: torch>=1.10.0
+Requires-Dist: scipy>=1.7.1
+Requires-Dist: torchvision>=0.11.1
+Dynamic: license-file
+Dynamic: requires-dist
