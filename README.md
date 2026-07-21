@@ -1,23 +1,23 @@
 # Minimal PatchCore
 
-This repository is now a small PatchCore implementation focused on three tasks:
+这是一个精简版 PatchCore 实现，主要覆盖三件事：
 
-- train a memory bank from normal images
-- run inference on a single image or a folder
-- export the model part to ONNX
+- 从正常样本图片中训练 memory bank
+- 对单张图片或文件夹做推理
+- 将模型侧的特征抽取部分导出为 ONNX
 
-The project no longer depends on MVTec-specific directory layouts or the previous script-heavy workflow.
+项目不再依赖 MVTec 固定目录结构，也不再依赖之前较重的脚本流程。
 
-## Install
+## 安装
 
 ```bash
 pip install -r requirements.txt
 pip install -e .
 ```
 
-## Train
+## 训练
 
-Training input is just a folder of normal images.
+训练输入只需要一个正常图片文件夹。
 
 ```bash
 python train.py \
@@ -27,23 +27,23 @@ python train.py \
   --image-size 320
 ```
 
-Useful options:
+常用参数：
 
 - `--layers layer2 layer3`
 - `--sampler approx_greedy_coreset --sample-ratio 0.1`
 - `--preprocess gaussian_blur`
 - `--cpu`
 
-Sampler options:
+采样器选项：
 
-- `identity`: keep all patch embeddings
-- `random`: random downsampling
-- `greedy_coreset`: best quality, usually slowest at training time
-- `approx_greedy_coreset`: recommended balance for large memory banks
+- `identity`：保留全部 patch embeddings
+- `random`：随机降采样
+- `greedy_coreset`：质量通常更好，但训练阶段最慢
+- `approx_greedy_coreset`：大 memory bank 场景下推荐，速度和质量比较均衡
 
-## Infer
+## 推理
 
-Inference input can be one image or a folder.
+推理输入可以是一张图片，也可以是一个图片文件夹。
 
 ```bash
 python infer.py \
@@ -53,15 +53,16 @@ python infer.py \
   --threshold 1.0
 ```
 
-Output:
+输出：
 
 - `infer_out/results.csv`
 - `infer_out/above_threshold/`
 - `infer_out/below_threshold/`
 
-## Export ONNX
+## 导出 ONNX
 
-Only the model side is exported. The FAISS index and distance search stay outside ONNX.
+这里只导出模型侧，也就是预处理后的图片到 patch embedding 的部分。
+FAISS index 和距离搜索仍然在 ONNX 外部执行。
 
 ```bash
 python convert_to_onnx.py \
@@ -69,243 +70,242 @@ python convert_to_onnx.py \
   --output-dir onnx_out
 ```
 
-Output:
+输出：
 
 - `onnx_out/patchcore_embedder.onnx`
 - `onnx_out/onnx_metadata.json`
 
-## Structure
+## 代码结构
 
-Core code lives in `src/patchcore/`:
+核心代码在 `src/patchcore/`：
 
-- `preprocess.py`: image loading and resize/pad/normalize
-- `backbones.py`: backbone registry
-- `embedding.py`: patchify and embedding aggregation
-- `common.py`: FAISS index and mask upsampling
-- `sampler.py`: memory bank sampling strategies
-- `patchcore.py`: train/infer orchestration
-- `onnx.py`: ONNX export wrapper
+- `preprocess.py`：图片读取、resize、padding、normalize
+- `backbones.py`：backbone 注册和加载
+- `embedding.py`：patchify 和 embedding 聚合
+- `common.py`：FAISS index 和 mask 上采样
+- `sampler.py`：memory bank 采样策略
+- `patchcore.py`：训练和推理主流程
+- `onnx.py`：ONNX 导出包装
 
-## Feature extraction and scoring flow
+## 特征抽取和得分流程
 
-This section follows the current code path in `src/patchcore/patchcore.py`,
-`src/patchcore/embedding.py`, and `src/patchcore/common.py`.
+这一节按当前代码实现来解释，主要对应：
 
-Notation:
+- `src/patchcore/patchcore.py`
+- `src/patchcore/embedding.py`
+- `src/patchcore/common.py`
 
-- `B`: batch size. This implementation usually processes one image at a time, so `B=1`.
-- `S`: configured square image size, from `--image-size`.
-- `L`: number of selected backbone layers, normally `2` for `layer2 layer3`.
-- `C_l, H_l, W_l`: channel, height, and width of feature layer `l`.
-- `P`: patch size, from `--patch-size`, default `3`.
-- `D_pre`: per-layer pooled patch dimension, from `--pretrain-embed-dim`, default `1024`.
-- `D`: final embedding dimension, from `--target-embed-dim`, default `1024`.
-- `Q`: number of query patch embeddings from one image.
-- `M`: number of memory bank embeddings after optional sampling.
-- `K`: nearest neighbors, from `--num-neighbors`, default `1`.
+符号说明：
 
-### 1. Image preprocessing
+- `B`：batch size。本实现通常一次处理一张图，所以 `B=1`。
+- `S`：输入正方形尺寸，来自 `--image-size`。
+- `L`：选择的 backbone 特征层数量，默认通常是 `layer2 layer3`，所以 `L=2`。
+- `C_l, H_l, W_l`：第 `l` 个特征层的通道数、高、宽。
+- `P`：patch size，来自 `--patch-size`，默认 `3`。
+- `D_pre`：单层 patch pooling 后的维度，来自 `--pretrain-embed-dim`，默认 `1024`。
+- `D`：最终 patch embedding 维度，来自 `--target-embed-dim`，默认 `1024`。
+- `Q`：单张图片产生的 query patch embedding 数量。
+- `M`：采样后的 memory bank embedding 数量。
+- `K`：最近邻数量，来自 `--num-neighbors`，默认 `1`。
 
-`ImagePreprocessor` loads an image, converts it to RGB, optionally applies a simple
-filter, resizes it with aspect ratio preserved, pads it to a square, converts it to a
-tensor, and applies ImageNet normalization.
+### 1. 图片预处理
 
-Shape change:
+`ImagePreprocessor` 会读取图片，转成 RGB，可选做简单滤波，然后保持长宽比 resize，
+再 padding 成正方形，最后转 tensor 并做 ImageNet normalize。
+
+维度变化：
 
 ```text
-original image                 [H0, W0, 3]
-resize + pad to square          [S, S, 3]
-ToTensor + Normalize + batch    [B, 3, S, S]
+原始图片                         [H0, W0, 3]
+resize + padding 成正方形          [S, S, 3]
+ToTensor + Normalize + batch       [B, 3, S, S]
 ```
 
-For the common command `--image-size 320`, the model input is:
+例如 `--image-size 320` 时，模型输入是：
 
 ```text
 [1, 3, 320, 320]
 ```
 
-### 2. Backbone feature maps
+### 2. Backbone 抽取特征图
 
-`FeatureExtractor` registers forward hooks on the configured layers, runs the
-torchvision backbone, and returns the captured feature maps in layer order.
+`FeatureExtractor` 会在配置的层上注册 forward hook，运行 torchvision backbone，
+然后按层顺序返回捕获到的 feature maps。
 
-For the default `wide_resnet50_2` with `layer2 layer3`, the typical spatial strides
-are `8` and `16` relative to the input image:
+默认 `wide_resnet50_2` 使用 `layer2 layer3`。这两层典型空间 stride 分别是输入图的
+`1/8` 和 `1/16`：
 
 ```text
-input image tensor    [B, 3, S, S]
+输入图片 tensor       [B, 3, S, S]
 layer2 feature map    [B, C2, S/8,  S/8]
 layer3 feature map    [B, C3, S/16, S/16]
 ```
 
-With `S=320`, this is typically:
+当 `S=320` 时，通常是：
 
 ```text
 layer2    [1, 512, 40, 40]
 layer3    [1, 1024, 20, 20]
 ```
 
-The exact channel counts depend on the selected backbone and layer names.
+具体通道数取决于选择的 backbone 和 layer 名称。
 
-### 3. Patchify each feature map
+### 3. 对每个 feature map 做 patchify
 
-`PatchMaker.patchify()` applies `torch.nn.Unfold` to every selected feature map.
-With the default `patch_size=3`, `patch_stride=1`, and symmetric padding, the patch
-grid keeps the same height and width as the feature map.
+`PatchMaker.patchify()` 使用 `torch.nn.Unfold` 对每个 feature map 滑窗取 patch。
+默认 `patch_size=3`、`patch_stride=1`，并使用对称 padding，所以 patch 网格的高宽
+和原 feature map 的高宽一致。
 
-For one feature map:
+对单层 feature map：
 
 ```text
 feature map                         [B, C_l, H_l, W_l]
-after Unfold                        [B, C_l * P * P, H_l * W_l]
-reshape + permute                   [B, H_l * W_l, C_l, P, P]
+Unfold 之后                         [B, C_l * P * P, H_l * W_l]
+reshape + permute 之后              [B, H_l * W_l, C_l, P, P]
 patch_shape                         (H_l, W_l)
 ```
 
-Example for `S=320`, `layer2`, `P=3`:
+例如 `S=320`、`layer2`、`P=3`：
 
 ```text
 [1, 512, 40, 40] -> [1, 1600, 512, 3, 3]
 patch_shape = (40, 40)
 ```
 
-### 4. Align patch grids across layers
+### 4. 对齐不同层的 patch 网格
 
-PatchCore combines patches from multiple feature layers. Since deeper layers have
-smaller spatial grids, `_align_patch_grid()` upsamples every layer's patch grid to
-the first selected layer's grid.
+PatchCore 会融合多个特征层的 patch。由于更深的层空间分辨率更小，
+`_align_patch_grid()` 会把所有层的 patch 网格上采样到第一层的 patch 网格大小。
 
-With default layer order `layer2 layer3`, the reference grid is `layer2`:
+默认层顺序是 `layer2 layer3`，所以参考网格是 `layer2` 的 `(40, 40)`：
 
 ```text
-layer2 patches    [B, 40*40, 512, 3, 3]     already on (40, 40)
-layer3 patches    [B, 20*20, 1024, 3, 3]    aligned to (40, 40)
+layer2 patches    [B, 40*40, 512, 3, 3]     已经是 (40, 40)
+layer3 patches    [B, 20*20, 1024, 3, 3]    需要对齐到 (40, 40)
 aligned layer3    [B, 40*40, 1024, 3, 3]
 ```
 
-After this step, each layer has the same number of patch locations:
+这一步之后，每个特征层都有相同数量的 patch 位置：
 
 ```text
 Q = B * H_ref * W_ref
 ```
 
-For one `320 x 320` image with `layer2` as reference:
+对于一张 `320 x 320` 图片，并以 `layer2` 为参考网格：
 
 ```text
 Q = 1 * 40 * 40 = 1600
 ```
 
-### 5. Pool each layer patch to `D_pre`
+### 5. 每层 patch pooling 到 `D_pre`
 
-Each aligned patch tensor is flattened across channel and local patch dimensions,
-then adaptively average-pooled to `D_pre`.
+每个对齐后的 patch 会把通道和局部 patch 维度展开，然后用
+`adaptive_avg_pool1d` 压到 `D_pre`。
 
-For each layer:
+对每个特征层：
 
 ```text
 aligned patches                  [B, H_ref*W_ref, C_l, P, P]
-flatten batch/locations          [Q, C_l, P, P]
-flatten patch content            [Q, 1, C_l * P * P]
-adaptive_avg_pool1d to D_pre     [Q, D_pre]
+合并 batch 和 patch 位置          [Q, C_l, P, P]
+展开 patch 内容                   [Q, 1, C_l * P * P]
+adaptive_avg_pool1d 到 D_pre      [Q, D_pre]
 ```
 
-Using defaults, every selected layer contributes one `[Q, 1024]` matrix, regardless
-of its original channel count.
+默认情况下，每个选中的特征层都会贡献一个 `[Q, 1024]` 矩阵，
+不管它原本的通道数是多少。
 
-### 6. Merge layers into final patch embeddings
+### 6. 融合多层，得到最终 patch embeddings
 
-`PatchcoreEmbedder.forward()` stacks the per-layer pooled vectors, flattens the
-layer dimension, and adaptively average-pools again to `D`.
+`PatchcoreEmbedder.forward()` 会把每层 pooled vectors stack 起来，
+再展平 layer 维度，最后再次使用 `adaptive_avg_pool1d` 压到最终维度 `D`。
 
 ```text
-pooled per layer list         L tensors of [Q, D_pre]
-torch.stack(dim=1)            [Q, L, D_pre]
-reshape                       [Q, 1, L * D_pre]
-adaptive_avg_pool1d to D      [Q, D]
+每层 pooled 结果列表        L 个 [Q, D_pre]
+torch.stack(dim=1)          [Q, L, D_pre]
+reshape                     [Q, 1, L * D_pre]
+adaptive_avg_pool1d 到 D    [Q, D]
 ```
 
-With defaults `L=2`, `D_pre=1024`, `D=1024`:
+默认 `L=2`、`D_pre=1024`、`D=1024`：
 
 ```text
-layer2 pooled                 [1600, 1024]
-layer3 pooled                 [1600, 1024]
-stack                         [1600, 2, 1024]
-flatten                       [1600, 1, 2048]
-final embeddings              [1600, 1024]
-patch_shape                   (40, 40)
+layer2 pooled               [1600, 1024]
+layer3 pooled               [1600, 1024]
+stack                       [1600, 2, 1024]
+flatten                     [1600, 1, 2048]
+final embeddings            [1600, 1024]
+patch_shape                 (40, 40)
 ```
 
-These final patch embeddings are what training stores and inference searches.
+训练时存进 memory bank、推理时拿去查最近邻的，就是这些最终 patch embeddings。
 
-### 7. Training: build the memory bank
+### 7. 训练：构建 memory bank
 
-`PatchCoreModel.fit()` embeds every normal training image with the flow above,
-concatenates all patch embeddings, optionally samples them, and builds a FAISS
-`IndexFlatL2`.
+`PatchCoreModel.fit()` 会对所有正常训练图片执行上面的 embedding 流程，
+把所有图片的 patch embeddings 拼接起来，然后可选采样，最后构建 FAISS
+`IndexFlatL2`。
 
-For `N` training images:
+对于 `N` 张训练图：
 
 ```text
-one image embeddings                 [Q, D]
-all training embeddings              [N * Q, D]
-after sampler                        [M, D]
-FAISS memory bank                    M vectors, each D-dimensional
+单张图片 embeddings               [Q, D]
+全部训练 embeddings               [N * Q, D]
+采样之后                          [M, D]
+FAISS memory bank                 M 个 D 维向量
 ```
 
-If `N=100`, `S=320`, default layers, and no sampling:
+如果 `N=100`、`S=320`、默认层配置，并且不采样：
 
 ```text
 Q = 1600
-all training embeddings = [160000, 1024]
+全部训练 embeddings = [160000, 1024]
 ```
 
-With `--sampler approx_greedy_coreset --sample-ratio 0.1`, the memory bank is about:
+如果使用 `--sampler approx_greedy_coreset --sample-ratio 0.1`，memory bank 大约是：
 
 ```text
 M = 160000 * 0.1 = 16000
 memory bank = [16000, 1024]
 ```
 
-The saved files are:
+保存的文件：
 
 ```text
-model_config.json     config + memory bank stats
-memory_bank.faiss     FAISS L2 search index
+model_config.json     配置和 memory bank 统计信息
+memory_bank.faiss     FAISS L2 搜索 index
 ```
 
-### 8. Inference: nearest-neighbor patch scores
+### 8. 推理：最近邻距离得到 patch 分数
 
-Inference embeds a test image into query patch embeddings and searches the FAISS
-memory bank.
+推理时，测试图片会先被转成 query patch embeddings，然后拿这些 query 去 FAISS
+memory bank 里查最近邻。
 
 ```text
-test image tensor              [1, 3, S, S]
-query embeddings               [Q, D]
-memory bank                    [M, D]
-FAISS search result distances  [Q, K]
-FAISS search result indices    [Q, K]
+测试图片 tensor              [1, 3, S, S]
+query embeddings             [Q, D]
+memory bank                  [M, D]
+FAISS 返回 distances         [Q, K]
+FAISS 返回 indices           [Q, K]
 ```
 
-`IndexFlatL2` returns squared L2 distances. The current scoring code averages the
-`K` distances for each query patch:
+`IndexFlatL2` 返回的是平方 L2 距离。当前代码会对每个 query patch 的 `K` 个距离取平均：
 
 ```text
 patch_scores = mean(distances, axis=1)
 patch_scores shape = [Q]
 ```
 
-With default `K=1`, this is just the nearest memory-bank distance per patch.
+当默认 `K=1` 时，这就是每个 patch 到 memory bank 最近邻的距离。
 
-### 9. Image score and heatmap
+### 9. 图片分数和热力图
 
-The image-level anomaly score is the maximum patch score:
+图片级异常分数取所有 patch 分数中的最大值：
 
 ```text
 image_score = max(patch_scores)
 ```
 
-Then patch scores are reshaped back to the reference feature grid and upsampled to
-image size:
+然后把 `patch_scores` reshape 回参考 feature grid，再上采样到输入图大小：
 
 ```text
 patch_scores                  [Q]
@@ -314,7 +314,7 @@ bilinear upsample             [1, S, S]
 gaussian smoothing            [S, S]
 ```
 
-For `S=320`, default layers:
+对于 `S=320`、默认层配置：
 
 ```text
 patch_scores                  [1600]
@@ -322,19 +322,18 @@ patch_map                     [1, 40, 40]
 mask                          [320, 320]
 ```
 
-`infer.py` overlays this mask on the processed image and writes the scalar
-`image_score` to `results.csv`. The threshold comparison is external to PatchCore
-itself:
+`infer.py` 会把这个 mask 覆盖到处理后的图片上，并把标量 `image_score` 写入
+`results.csv`。阈值判断是在 PatchCore 外部做的：
 
 ```text
 image_score >= threshold -> ANOMALY
 image_score < threshold  -> OK
 ```
 
-### End-to-end default example
+### 默认配置的完整维度例子
 
-For one `320 x 320` image, `wide_resnet50_2`, `layer2 layer3`, `patch_size=3`,
-`D_pre=1024`, and `D=1024`:
+一张 `320 x 320` 图片，使用 `wide_resnet50_2`、`layer2 layer3`、`patch_size=3`、
+`D_pre=1024`、`D=1024`：
 
 ```text
 image                  [1, 3, 320, 320]
@@ -350,10 +349,10 @@ FAISS distances        [1600, K]
 patch_scores           [1600]
 patch_map              [1, 40, 40]
 mask                   [320, 320]
-image_score            scalar max over 1600 patch scores
+image_score            对 1600 个 patch_scores 取最大值后的标量
 ```
 
-## Backbone changes
+## 更换 Backbone
 
-Backbone switching is now localized to config and `src/patchcore/backbones.py`.
-If you want to add DINOv2 later, the right extension point is the backbone/extractor layer, not the CLI scripts.
+Backbone 切换集中在 config 和 `src/patchcore/backbones.py`。
+如果后续想加 DINOv2，合适的扩展点是 backbone/extractor 层，而不是 CLI 脚本。
