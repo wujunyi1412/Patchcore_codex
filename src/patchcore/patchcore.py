@@ -37,7 +37,8 @@ class FeatureExtractor(torch.nn.Module):
         self.feature_layers = feature_layers
         self._handles = []
         self._outputs: dict[str, torch.Tensor] = {}
-        self._register_hooks()
+        if not hasattr(self.backbone, "extract_feature_maps"):
+            self._register_hooks()
 
     def _resolve_module(self, dotted_name: str) -> torch.nn.Module:
         module: torch.nn.Module = self.backbone
@@ -60,6 +61,8 @@ class FeatureExtractor(torch.nn.Module):
         return hook
 
     def forward(self, images: torch.Tensor) -> list[torch.Tensor]:
+        if hasattr(self.backbone, "extract_feature_maps"):
+            return self.backbone.extract_feature_maps(images, self.feature_layers)
         self._outputs.clear()
         _ = self.backbone(images)
         return [self._outputs[name] for name in self.feature_layers]

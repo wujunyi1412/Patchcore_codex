@@ -89,3 +89,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+"python train.py --train-dir dataset/corona_images/train/good --output-dir artifacts/dinov2_bank --backbone dinov2_vits14 --image-size 320"

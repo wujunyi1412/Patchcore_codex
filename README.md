@@ -34,6 +34,26 @@ python train.py \
 - `--preprocess gaussian_blur`
 - `--cpu`
 
+使用 DINOv2 backbone：
+
+```bash
+python train.py \
+  --train-dir dataset/train/good \
+  --output-dir artifacts/dinov2_bank \
+  --backbone dinov2_vits14 \
+  --image-size 320
+```
+
+当前支持的 DINOv2 backbone：
+
+- `dinov2_vits14`
+- `dinov2_vitb14`
+- `dinov2_vitl14`
+- `dinov2_vitg14`
+
+这些模型通过 `torch.hub.load("facebookresearch/dinov2", ...)` 加载，第一次运行时需要能访问
+PyTorch Hub 和模型权重下载地址。
+
 采样器选项：
 
 - `identity`：保留全部 patch embeddings
@@ -355,4 +375,27 @@ image_score            对 1600 个 patch_scores 取最大值后的标量
 ## 更换 Backbone
 
 Backbone 切换集中在 config 和 `src/patchcore/backbones.py`。
-如果后续想加 DINOv2，合适的扩展点是 backbone/extractor 层，而不是 CLI 脚本。
+
+ResNet 类 backbone 直接通过 forward hook 抽取 `layer2/layer3` 这类 CNN feature map。
+DINOv2 是 ViT，不会天然输出 `[B, C, H, W]` 的 CNN feature map，所以代码里加了
+`DinoV2FeatureMapBackbone` 包装：
+
+- 默认层名使用 transformer block，例如 `blocks.5 blocks.11`。
+- wrapper 调用 DINOv2 的 `get_intermediate_layers(..., reshape=True)`。
+- DINOv2 patch tokens 会被还原成 `[B, C, H_token, W_token]`。
+- 后续 `patchify -> embedding -> FAISS` 流程保持不变。
+
+DINOv2 默认 patch size 是 `14`。如果 `--image-size 320`，token 网格通常是：
+
+```text
+H_token = floor(320 / 14) = 22
+W_token = floor(320 / 14) = 22
+```
+
+因此一张图默认产生的 patch embedding 数量约为：
+
+```text
+Q = 1 * 22 * 22 = 484
+```
+
+这和 ResNet `layer2` 在 `320 x 320` 下的 `40 x 40 = 1600` 个 patch 不同。

@@ -173,3 +173,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+" python infer.py --model-dir artifacts/dinov2_bank --input dataset/corona_images/test/broken --output-dir infer_out/dinov2 --threshold 1.0"
