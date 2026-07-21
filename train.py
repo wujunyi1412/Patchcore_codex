@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Feature layers to extract. Default depends on the backbone.",
     )
-    parser.add_argument("--image-size", type=int, default=320)
+    parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument(
         "--preprocess",
         default="none",
@@ -46,14 +46,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-neighbors", type=int, default=1)
     parser.add_argument(
         "--sampler",
-        default="identity",
+        default="approx_greedy_coreset",
         choices=["identity", "random", "greedy_coreset", "approx_greedy_coreset"],
         help="Sampling strategy used before building the memory bank.",
     )
     parser.add_argument(
         "--sample-ratio",
         type=float,
-        default=1.0,
+        default=0.1,
         help="Keep only a ratio of patch embeddings before indexing.",
     )
     parser.add_argument("--cpu", action="store_true")

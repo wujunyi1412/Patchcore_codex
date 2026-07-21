@@ -160,7 +160,7 @@ class PatchCoreModel:
 def default_config(
     backbone_name: str = "wide_resnet50_2",
     feature_layers: list[str] | None = None,
-    image_size: int = 320,
+    image_size: int = 224,
     preprocess: str = "none",
     pretrain_embed_dim: int = 1024,
     target_embed_dim: int = 1024,

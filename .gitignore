@@ -1,6 +1,7 @@
 .idea/
 __pycache__/
 LabletAnomaly.egg-info/
+custom_corona/
 
 build/
 dataset/
